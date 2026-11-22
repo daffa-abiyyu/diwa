@@ -1,0 +1,17 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /users/{userId}/transactions/{transactionId}/{fileName} {
+      function ownsUserData() {
+        return request.auth != null && request.auth.uid == userId;
+      }
+
+      allow read: if ownsUserData();
+      allow create, update: if ownsUserData()
+        && request.resource.size <= 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp|heic)');
+      allow delete: if ownsUserData();
+    }
+  }
+}

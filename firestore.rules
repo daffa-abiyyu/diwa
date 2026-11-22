@@ -1,0 +1,129 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function ownsUserData(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    function validProfile(userId) {
+      return request.resource.data.keys().hasOnly([
+          'uid', 'displayName', 'email', 'photoURL', 'phoneNumber',
+          'preferredLanguage', 'currency', 'theme', 'accentColor',
+          'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.uid == userId
+        && request.resource.data.preferredLanguage in ['en', 'id']
+        && request.resource.data.currency is string
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.updatedAt is timestamp;
+    }
+
+    function accountExists(userId, accountId) {
+      return exists(/databases/$(database)/documents/users/$(userId)/accounts/$(accountId));
+    }
+
+    function validAccount(accountId) {
+      return request.resource.data.keys().hasAll([
+          'id', 'name', 'provider', 'type', 'openingBalance', 'openingDate',
+          'color', 'archived', 'version', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'id', 'name', 'provider', 'type', 'openingBalance', 'openingDate',
+          'color', 'archived', 'version', 'createdAt', 'updatedAt', 'deletedAt'
+        ])
+        && request.resource.data.id == accountId
+        && request.resource.data.name is string
+        && request.resource.data.provider is string
+        && request.resource.data.type in ['Bank', 'E-Wallet', 'Cash', 'Other']
+        && request.resource.data.openingBalance is number
+        && request.resource.data.openingBalance >= 0
+        && request.resource.data.openingDate is string
+        && request.resource.data.archived is bool
+        && request.resource.data.version is int
+        && request.resource.data.version >= 0
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.updatedAt is timestamp;
+    }
+
+    function validTransaction(transactionId) {
+      let data = request.resource.data;
+      return data.keys().hasAll([
+          'id', 'type', 'amount', 'title', 'transactionDate', 'version',
+          'createdAt', 'updatedAt', 'source'
+        ])
+        && data.keys().hasOnly([
+          'id', 'type', 'amount', 'title', 'categoryId', 'categoryNameSnapshot',
+          'accountId', 'fromAccountId', 'toAccountId', 'transactionDate', 'note',
+          'paymentMethod', 'merchant', 'items', 'receiptPath', 'receiptName', 'version',
+          'createdAt', 'updatedAt', 'deletedAt', 'source', 'operationId'
+        ])
+        && data.id == transactionId
+        && data.type in ['income', 'expense', 'transfer']
+        && data.amount is int
+        && data.amount > 0
+        && data.title is string
+        && data.transactionDate is string
+        && data.version is int
+        && data.version >= 0
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && data.source in ['manual', 'receipt_scan']
+        && (!('receiptPath' in data) || data.receiptPath is string)
+        && (!('items' in data) || (data.items is list && data.items.size() <= 50))
+        && (!('receiptName' in data) || data.receiptName is string)
+        && (data.type == 'transfer'
+          ? data.fromAccountId is string
+            && data.toAccountId is string
+            && data.fromAccountId != data.toAccountId
+            && accountExists(request.auth.uid, data.fromAccountId)
+            && accountExists(request.auth.uid, data.toAccountId)
+          : data.accountId is string
+            && accountExists(request.auth.uid, data.accountId));
+    }
+
+    function validCategory(categoryId) {
+      let data = request.resource.data;
+      return data.keys().hasAll(['id', 'name', 'type', 'icon', 'color', 'isDefault', 'version', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'name', 'type', 'icon', 'color', 'isDefault', 'version', 'createdAt', 'updatedAt', 'deletedAt'])
+        && data.id == categoryId
+        && data.name is string
+        && data.type in ['income', 'expense']
+        && data.icon is string
+        && data.color is string
+        && data.isDefault is bool
+        && data.version is int
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    match /users/{userId} {
+      allow read: if ownsUserData(userId);
+      allow create, update: if ownsUserData(userId) && validProfile(userId);
+      allow delete: if false;
+
+      match /accounts/{accountId} {
+        allow read: if ownsUserData(userId);
+        allow create, update: if ownsUserData(userId) && validAccount(accountId);
+        allow delete: if false;
+      }
+
+      match /transactions/{transactionId} {
+        allow read: if ownsUserData(userId);
+        allow create, update: if ownsUserData(userId) && validTransaction(transactionId);
+        allow delete: if false;
+      }
+
+      match /categories/{categoryId} {
+        allow read: if ownsUserData(userId);
+        allow create, update: if ownsUserData(userId) && validCategory(categoryId);
+        allow delete: if false;
+      }
+
+      match /settings/{settingId} {
+        allow read, create, update: if ownsUserData(userId);
+        allow delete: if false;
+      }
+    }
+  }
+}
